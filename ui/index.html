@@ -4412,6 +4412,22 @@
       const requestedMode = ["light", "dark", "auto"].includes(appearance.themeMode) ? appearance.themeMode : "auto";
       const inferredLightTheme = contrastRatio(palette.background || DEFAULT_APPEARANCE.palette.background, "#ffffff") < 4.5;
       const isLightTheme = requestedMode === "light" ? true : requestedMode === "dark" ? false : inferredLightTheme;
+      // An explicit themeMode skips the inference above, and the appearance
+      // generator is prompted for "dark" | "light" and never "auto", so a
+      // generated theme regularly pairs a mode with a palette from the opposite
+      // end of the scale. The mode picks the text colour while the palette picks
+      // the page background, and that mismatch paints near-white text onto a
+      // near-white page. Pull the base colours onto the side the mode asked for.
+      // A palette that already agrees is returned untouched, so the shipped
+      // defaults and any hand-picked theme render exactly as before.
+      const toThemeSide = (value, fallback) => {
+        const color = value || fallback;
+        const colorIsLight = contrastRatio(color, "#ffffff") < 4.5;
+        if (colorIsLight === isLightTheme) return color;
+        return mixHex(color, isLightTheme ? "#ffffff" : DEFAULT_APPEARANCE.palette.background, 0.82);
+      };
+      const themedBackground = toThemeSide(palette.background, DEFAULT_APPEARANCE.palette.background);
+      const themedSurface = toThemeSide(palette.surface, DEFAULT_APPEARANCE.palette.surface);
       const textColor = isLightTheme ? "#0f172a" : "#f7f7fb";
       const mutedColor = isLightTheme ? "rgba(15, 23, 42, 0.68)" : "rgba(255, 255, 255, 0.58)";
       const mutedStrongColor = isLightTheme ? "rgba(15, 23, 42, 0.82)" : "rgba(255, 255, 255, 0.74)";
@@ -4434,30 +4450,30 @@
       root.style.setProperty("--border", borderColor);
       root.style.setProperty("--border-soft", borderSoftColor);
       root.style.setProperty("--shadow", shadowColor);
-      root.style.setProperty("--surface-tint", withAlpha(palette.surface || DEFAULT_APPEARANCE.palette.surface, 0.18));
-      root.style.setProperty("--surface-tint-strong", withAlpha(palette.surface || DEFAULT_APPEARANCE.palette.surface, 0.28));
+      root.style.setProperty("--surface-tint", withAlpha(themedSurface, 0.18));
+      root.style.setProperty("--surface-tint-strong", withAlpha(themedSurface, 0.28));
       root.style.setProperty("--bg-start", isLightTheme
-        ? mixHex(palette.background || DEFAULT_APPEARANCE.palette.background, "#ffffff", 0.18)
-        : shiftHex(palette.background || DEFAULT_APPEARANCE.palette.background, -10));
+        ? mixHex(themedBackground, "#ffffff", 0.18)
+        : shiftHex(themedBackground, -10));
       root.style.setProperty("--bg-mid", isLightTheme
-        ? mixHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, "#ffffff", 0.38)
-        : shiftHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, -26));
+        ? mixHex(themedSurface, "#ffffff", 0.38)
+        : shiftHex(themedSurface, -26));
       root.style.setProperty("--bg-end", isLightTheme
         ? mixHex(palette.accent || DEFAULT_APPEARANCE.palette.accent, "#ffffff", 0.62)
         : shiftHex(palette.accent || DEFAULT_APPEARANCE.palette.accent, -62));
-      root.style.setProperty("--bg-glow-a", withAlpha(palette.surface || DEFAULT_APPEARANCE.palette.surface, isLightTheme ? 0.22 : 0.55));
+      root.style.setProperty("--bg-glow-a", withAlpha(themedSurface, isLightTheme ? 0.22 : 0.55));
       root.style.setProperty("--bg-glow-b", withAlpha(palette.accent || DEFAULT_APPEARANCE.palette.accent, isLightTheme ? 0.18 : 0.34));
       root.style.setProperty("--bg-glow-c", withAlpha(palette.secondary || DEFAULT_APPEARANCE.palette.secondary, isLightTheme ? 0.16 : 0.28));
       root.style.setProperty("--sidebar-wash-top", withAlpha(
         isLightTheme
-          ? mixHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, "#ffffff", 0.74)
-          : shiftHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, -24),
+          ? mixHex(themedSurface, "#ffffff", 0.74)
+          : shiftHex(themedSurface, -24),
         isLightTheme ? 0.94 : 0.92
       ));
       root.style.setProperty("--sidebar-wash-bottom", withAlpha(
         isLightTheme
-          ? mixHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, "#ffffff", 0.52)
-          : shiftHex(palette.surface || DEFAULT_APPEARANCE.palette.surface, -8),
+          ? mixHex(themedSurface, "#ffffff", 0.52)
+          : shiftHex(themedSurface, -8),
         isLightTheme ? 0.82 : 0.74
       ));
       root.style.setProperty("--sidebar-glow", withAlpha(palette.secondary || DEFAULT_APPEARANCE.palette.secondary, isLightTheme ? 0.14 : 0.24));

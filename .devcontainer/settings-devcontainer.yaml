@@ -1,0 +1,14 @@
+# Profile activated inside the dev container (PGPT_PROFILES=devcontainer, found
+# through PGPT_SETTINGS_FOLDER — both set in .devcontainer/docker-compose.yml).
+# Merged on top of settings.yaml; the `test` profile is merged after this one,
+# so `make test` keeps using its own local database under local_data/tests.
+
+qdrant:
+  # Use the `qdrant` compose service instead of the embedded on-disk database.
+  # `path` must be null: QdrantClientBuilder.is_local_path() treats any
+  # non-null path as local mode and ignores the url, and qdrant-client refuses
+  # to take both. settings.yaml always resolves a path (it defaults to
+  # local_data/qdrant), so it has to be cleared here rather than via the
+  # environment.
+  url: ${PGPT_QDRANT_URL:http://qdrant:6333}
+  path: null

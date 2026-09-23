@@ -1,7 +1,7 @@
 ARG EXTRAS="core"
 ARG PLAYWRIGHT_VERSION="1.60.0"
 
-FROM python:3.11.10-slim-bookworm AS base
+FROM python:3.11.16-slim-bookworm AS base
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV PATH="/usr/local/bin:${PATH}"
 ENV UV_LINK_MODE=copy \

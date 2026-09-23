@@ -1,0 +1,122 @@
+# Dev container stack: the workspace container plus the services PrivateGPT
+# talks to. Started by VS Code (Dev Containers) via .devcontainer/devcontainer.json;
+# `docker compose -f .devcontainer/docker-compose.yml up -d` works standalone too.
+name: pgpt-devcontainer
+
+services:
+  app:
+    # Reuses the repo Dockerfile. `os-deps` is the stage that installs the
+    # system libraries the extras need (libmagic/poppler/libreoffice for
+    # documents, ffmpeg for media, the Chromium shared libs for web scraping,
+    # ODBC/MariaDB for database tools) on top of python:3.11 + uv, without
+    # baking the application code or a production venv into the image. The venv
+    # is created from the workspace by post-create.sh, exactly like `make` does
+    # on a host.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: os-deps
+      args:
+        # Space-separated extras; drives which apt groups os-deps installs.
+        EXTRAS: core
+
+    # Keeps the container up for VS Code to attach to; `init` reaps the
+    # processes that lifecycle commands and terminals leave behind.
+    command: sleep infinity
+    init: true
+
+    volumes:
+      - ..:/workspaces/private-chat:cached
+      # Claude Code's credentials and config. Docker creates a named volume
+      # root-owned when the image has no such path, so post-create.sh chowns
+      # these three to the remote user (`app`) before it does anything else.
+      - claude_home:/home/app/.claude
+      # Keep the container venv off the bind mount so it cannot clash with a
+      # host-built .venv (different platform, different interpreter path).
+      - pgpt-devcontainer-venv:/workspaces/private-chat/.venv
+      # Persist the uv download cache across rebuilds. Must live under the
+      # remote user's home, not /root, which `app` cannot write.
+      - pgpt-devcontainer-uv-cache:/home/app/.cache/uv
+
+    environment:
+      # Roots local_data/, models/ and caches inside the workspace, which is
+      # also what `make test` does (TEST_PGPT_HOME=$(CURDIR)).
+      PGPT_HOME: /workspaces/private-chat
+      HF_HOME: /workspaces/private-chat/local_data
+      PLAYWRIGHT_BROWSERS_PATH: /workspaces/private-chat/.local-browsers
+      PYTHONPATH: /workspaces/private-chat
+      PYTHONUNBUFFERED: "1"
+      UV_LINK_MODE: copy
+      VIRTUAL_ENV: /workspaces/private-chat/.venv
+
+      # The Dockerfile's base stage sets UV_CACHE_DIR=/root/.cache/uv, which is
+      # unwritable for `app`; point it at the mounted cache volume instead.
+      UV_CACHE_DIR: /home/app/.cache/uv
+
+      # Keeps Claude Code's whole state -- .credentials.json *and* the
+      # ~/.claude.json it would otherwise write beside the directory -- inside
+      # the claude_home volume, so a rebuild does not log you out.
+      CLAUDE_CONFIG_DIR: /home/app/.claude
+
+      # Points the settings loader at .devcontainer/settings-devcontainer.yaml,
+      # which switches Qdrant from the embedded on-disk database to the
+      # `qdrant` service below. Root stays in the list so settings.yaml,
+      # settings-test.yaml and settings-mock.yaml still resolve.
+      PGPT_SETTINGS_FOLDER: /workspaces/private-chat/.devcontainer,/workspaces/private-chat
+      PGPT_PROFILES: devcontainer
+      PGPT_QDRANT_URL: http://qdrant:6333
+
+      # PrivateGPT does not run models. Point this at your OpenAI-compatible
+      # inference server; the default assumes Ollama on the host (`ollama serve`,
+      # port 11434). LM Studio defaults to port 1234 and needs "Serve on Local
+      # Network" enabled, or it binds 127.0.0.1 and is unreachable from here.
+      #
+      # Reaching the host also needs its firewall to accept traffic from the
+      # Docker bridge subnets: ufw's default "deny incoming" silently DROPs
+      # container -> host packets (outbound and container-to-container traffic
+      # keep working, so only this hop breaks) and the app reports a connect
+      # timeout against /v1/models. See .vscode/launch.json for how to tell a
+      # firewall DROP apart from a loopback-only bind.
+      #
+      # This is committed, so override it per machine rather than editing it:
+      # the "env" blocks in .vscode/launch.json (gitignored) for debug sessions,
+      # or `export OPENAI_API_BASE=...` for terminals.
+      #
+      # OPENAI_EMBEDDING_API_BASE is deliberately not set: embedding_component.py
+      # falls back to `embedding_api_base or api_base`, so embeddings follow
+      # OPENAI_API_BASE and one override steers both. Set it only when a
+      # *separate* server handles embeddings.
+      OPENAI_API_BASE: http://host.docker.internal:1234/v1
+
+    # The app stays on 8080 *inside* the container (settings.yaml resolves
+    # `port: ${PORT:8080}`, and tests/server/test_ui_mount.py asserts that
+    # default), and Docker publishes it on a non-contested host port. Change
+    # the left-hand number to move the host side; nothing in the repo depends
+    # on it.
+    ports:
+      - "18080:8080"
+
+    # Lets the container reach services running on the host (e.g. Ollama) at
+    # host.docker.internal on Linux, where Docker does not add it by default.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    depends_on:
+      - qdrant
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - pgpt-devcontainer-qdrant:/qdrant/storage
+    # REST on the host at http://localhost:16333/dashboard; the app reaches
+    # 6333/6334 (gRPC) directly over the compose network, so only the REST port
+    # is published.
+    ports:
+      - "16333:6333"
+
+volumes:
+  pgpt-devcontainer-venv:
+  pgpt-devcontainer-uv-cache:
+  pgpt-devcontainer-qdrant:
+  claude_home:

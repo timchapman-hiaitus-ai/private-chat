@@ -1,0 +1,98 @@
+{
+  "name": "PrivateGPT",
+
+  // The stack (workspace container + Qdrant) lives in docker-compose.yml so the
+  // same definition works from VS Code and from a plain `docker compose up`.
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "remoteUser": "app",
+  "runServices": ["app", "qdrant"],
+  "workspaceFolder": "/workspaces/private-chat",
+
+  // PATH has to live here, not in the compose `environment` block:
+  // `${containerEnv:VAR}` is only resolved for remoteEnv. Set at container
+  // creation it would be passed through verbatim, dropping /usr/bin from PATH
+  // and killing the container on startup ("sleep: not found"). remoteEnv covers
+  // terminals, tasks, debugging and the lifecycle commands, which is everything
+  // that needs the venv on PATH.
+  "remoteEnv": {
+    "PATH": "/workspaces/private-chat/.venv/bin:${containerEnv:PATH}",
+
+    // Extras post-create.sh hands to `uv sync` (its own default is "dev core").
+    // `queue` adds celery + flower + pika, which `make celery-worker`,
+    // `make flower` and the celery debug config in .vscode/launch.json need —
+    // without it PGPT_WORKER_MODE=celery dies with "No module named 'celery'".
+    // It belongs in remoteEnv for the same reason as PATH: that is what the
+    // lifecycle commands see. No matching change is needed to the compose
+    // build arg, since the Dockerfile's os-deps stage maps no apt packages to
+    // the queue extras.
+    // No OPENAI_API_BASE here on purpose: the endpoint is machine-specific
+    // and this file is committed. docker-compose.yml holds the portable
+    // default; override it per machine in .vscode/launch.json (gitignored) or
+    // by exporting OPENAI_API_BASE in the terminal.
+    "PGPT_DEV_EXTRAS": "dev core queue"
+  },
+
+  // 8080 (API + /ui) and 6333 (Qdrant) are published by docker-compose.yml on
+  // host ports 18080 and 16333; these are the ones VS Code still needs to
+  // forward on demand.
+  "forwardPorts": [5555],
+  "portsAttributes": {
+    // Already published by compose — don't let VS Code tunnel them again.
+    "8080": { "label": "PrivateGPT API + /ui (host: 18080)", "onAutoForward": "ignore" },
+    "6333": { "label": "Qdrant REST (host: 16333)", "onAutoForward": "ignore" },
+    "5555": { "label": "Flower (Celery)", "onAutoForward": "silent" }
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // Docker re-creates an *empty* named volume's root directory root-owned on
+  // every mount (the image has no /home/app/.claude to inherit ownership from),
+  // so the chown in post-create.sh is not enough on its own: before you have
+  // logged in once, the directory is back to root:root after a plain container
+  // start and `claude` cannot write ~/.claude/.credentials.json -- the login
+  // appears to succeed and then does not stick. Idempotent, so it is cheap to
+  // repeat once the volume has contents.
+  "postStartCommand": "sudo chown -R $(id -u):$(id -g) \"$HOME/.claude\"",
+
+  "features": {
+      "ghcr.io/devcontainers/features/common-utils:2.6.0": {
+          "configureZshAsDefaultShell": true,
+          "installOhMyZsh": true,
+          "installZsh": true,
+          "upgradePackages": true
+      },
+      "ghcr.io/devcontainers/features/git:1.3.8": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "astral-sh.ty",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-vscode.live-server",
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspaces/private-chat/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.testing.pytestArgs": ["tests"],
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.codeActionsOnSave": { "source.organizeImports.ruff": "explicit" }
+        },
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.ruff_cache": true,
+          "**/.pytest_cache": true
+        }
+      }
+    }
+  }
+}
